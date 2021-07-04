@@ -1,4 +1,4 @@
-# Handling PostgreSQL bytea (BLOB) fields in SQL, PHP, Drupal
+# DRAFT: Handling PostgreSQL bytea (BLOB) fields in SQL, PHP, Drupal
 
 While I was upgrading a very old Drupal 6/PostgreSQL website to Drupal 7, I encountered enough issues around wrong(ly encoded) values in both query input and output... that I couldn't remember how they fit together. The logical next step is trying to write an overview of the issues that I could refer to in the future when I'd forget the details again.
 
@@ -12,24 +12,27 @@ The biggest cause of confusion turned out to be usage of backslashes: when are t
 
 Another more minor challenge is keeping in mind when we are looking at an actual string vs. a string representation of a byte value.
 
+(And then, there's confusion stemming from Drupal issues which aren't always clear - even some which are marked as 'fixed'.)
+
 ## Escaped string representations in SQL statements
 
 PostgreSQL has two characters it uses as a prefix to 'escape' other characters inside strings, in expressions used in SQL statements.
 
 Let's address the simples one first: the single quote (') is only used to escape another single quote, and works the same in any kind of string representation. It is only used as an escape character in SQL expressions; not in results returned from the server. This means the SQL expression `''''` represents _a single character_.
+```
     select '''', length('''');
      ?column? | length
     ----------+--------
      '        |      1
     (1 row)
-
-The other one is the backslash (\)... sometimes. For the purpose of this text, we'll highlight the following:
+```
+The other one is the backslash (`\`)... sometimes. For the purpose of this text, we'll highlight the following:
 
 * Backslashes are only seen as an escape character if the `standard_conforming_strings` parameter is set to 'off'. If it is 'on', a backslash is just another character in the string. It's 'on' by default since PostgreSQL 9.1.
 * Significant escape sequences, i.e. characters following the backslash, are:
-** up to three digits 0-7: interpreted as a character with the corresponding octal byte value. (Any further and/or higher digits are seen as literal characters.)
-** \x + one/two hex digits: interpreted as a character with the corresponding hexadecimal byte value.
-** A full list of escape sequences, and references to other parameters influencing them, is available in PostgreSQL documentation about [C-Style Escapes](https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS-ESCAPE).
+  * up to three digits 0-7: interpreted as a character with the corresponding octal byte value. (Any further and/or higher digits are seen as literal characters.)
+  * \x + one/two hex digits: interpreted as a character with the corresponding hexadecimal byte value.
+  * A full list of escape sequences, and references to other parameters influencing them, is available in PostgreSQL documentation about [C-Style Escapes](https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS-ESCAPE).
 * Most characters with a trailing backslash are just interpre`ted as that single character, e.g. `'\\'` is a single backslash and `'\'' is a single quote _if `standard_conforming_strings = off`_. Do not use \' though; it's potentially insecure. (By default `standard_conforming_strings = on`, `'\''` is an unterminated first part of a string. See more references to info in above link, if interested.) Use `''''` instead.
 
 PostgreSQL has a string notation which always interprets those escape codes regardless of PostgreSQL version/parameters: `E'<string value>'`. This can be useful, given that 'regular' strings are ambiguous and nowadays don't treat a backslash as an escape code. We won't do much with this notation in this text except mention them for completeness in several places.
@@ -42,7 +45,9 @@ Note that escaped characters are not byte values, they are _characters_ (with a 
 
 ### Escape sequences in strings converted to bytea
 
-bytea data needs to be represented with some kind of characters in SQL expressions ('input') and/or results returned from the server. For SQL, there are two distinct types of strings which can be implicitly used as (or explicitly converted to) bytea:
+In SQL expressions ('input') and/or results returned from the server, bytea data needs to have some kind of character representation.
+
+For SQL, there are two distinct types of strings which can be implicitly used as (or explicitly converted to) bytea:
 
 First, regular strings where any occurring backslash is used as an escape code to represent a single byte, when followed by:
 * exactly three octal digits between 000 and 377;
@@ -80,15 +85,15 @@ _(I wrote this section before being able to summarize things above. This may con
 
 The following expressions are all SQL representations of the same two-byte value, which can be e.g. printed back in the psql client using a simple `SELECT <expression>;` statement, or inserted/updated into a column using e.g. `update cache set data = EXPRESSION where where cid='test';`:
 
-    `decode('5878','hex')`
+    decode('5878','hex')
 
 This expression takes '5878' to be an encoded hex value and converts it back to a byte value. This kind of expression can unambiguously represent any byte value.
 
-    `'Xx'`, `E'\130\170'` or `E'\x58\x78'` (or `E'\x58x'`, etc) or U&'\0058x'
+    'Xx', E'\130\170' or E'\x58\x78' (or E'\x58x', etc) or U&'\0058x'
 
 These are all unambiguous representations of the exact same two-character string which can be _converted_ to a two-byte value.
 
-    `'\130\170'`, and `'\\130\\170'` & `'\x58\x78'` _for `standard_conforming_strings = off`_.
+    '\130\170', and '\\130\\170' & '\x58\x78' for standard_conforming_strings = off.
 
 If `standard_conforming_strings = off`,
 
@@ -105,12 +110,12 @@ If `standard_conforming_strings = on`,
 * On PostgreSQL 8, using the eight-character string `'\x58\x78'` in a bytea context raises an `ERROR:  invalid input syntax for type bytea`.
 
 * On PostgreSQL 9(.0/1?), using `'\x58\x78'` in a bytea context raises an `ERROR:  invalid hexadecimal digit: "\"`. This is because of the '\x' syntax discussd just below, and is the reason that just the four-character string `'\x58'` is usable as a single byte.
-
-    `E'\\x5878'` _for PostgreSQL >= 9_
-
+```
+    E'\\x5878' for PostgreSQL >= 9
+```
 This represents a six-character string '\x5878', which can be converted to a two byte value. They are valid in _(I am almost sure)_ PostgreSQL >= 9.0 or 9.1.[fn]I haven't seen specifications of when this syntax was first allowed.[/fn] In PostgreSQL 8, these expressions cannot be used to represent bytes, and raise an error `invalid input syntax for type bytea`.[/fn]
 
-    `'\x5878'` or `'\\x5878',  _depending on `standard_conforming_strings`_.  
+    '\x5878' or '\\x5878', depending on `standard_conforming_strings`.  
 
 These also are invalid in PostgreSQL 8 (except the 'escaped backslash' from the last bullet).
 
@@ -118,7 +123,7 @@ If `standard_conforming_strings = off`,
 
 * `'\x5878'` actually represents a three-character string 'X78' that can be converted to a three-byte value; like above, only certain character sequences are allowed and a warning is raised about "nonstandard use of escape", like `'\130\170'`.
 
-* `'\\x5878'` represents a six-character string that be converted to a two-byte value (also representable by 'Xx'); any values are allowed, and a warning is raised about "nonstandard use of \\", like `'\\130\\170'`.
+* `'\\x5878'` represents a six-character string that be converted to a two-byte value (also representable by 'Xx'); any values are allowed, and a warning is raised about "`nonstandard use of \\`", like `'\\130\\170'`.
 
 If `standard_conforming_strings = on`,
 
@@ -129,11 +134,12 @@ If `standard_conforming_strings = on`,
 ## How bytea data is represented on output (by psql)
 
 Before PostgreSQL 9.0, bytes were always displayed as characters where possible, and otherwise as escaped octal sequences. For instance the six byte sequence `decode('275c787e227f', 'hex')` is output as `'\\x~"\177` - where the last byte is represented as an escaped number, the second byte (5c) is an _escaped_ (i.e. double) backslash, and the other 4 bytes are single characters.
+```
     select decode('275c787e227f', 'hex');
        decode
     ------------
      '\\x~"\177
-
+```
 In PostgreSQL 9.0, the `bytea_output` parameter was introduced and the default output was changed. For `bytea_output = 'escape'`, the value will be  output the same as before (above); for the new default `bytea_output = 'hex'`, the value will be output as `\x275c787e227f`.
 
 Notes:
@@ -157,11 +163,9 @@ The pgsql PHP extension just sends SQL statements through and retrieves data row
 
 A query result always returns an encoded string for a bytea value - i.e. the above two-byte example field as either `Xx` or `\x5878` (default since PostgreSQL 9) depending on the `bytea_output` parameter.
 
-And e.g. the statement
-    $res = pg_query($connection, "update cache set data='\\x5878' where cid='test';");
-updates either a three- or two-byte value, depending on the `standard_conforming_strings` parameter (or cannot work for PostgreSQL <9.1 with `standard_conforming_strings = on`), like documented above.
+And e.g. the statement`$res = pg_query($connection, "update cache set data='\\x5878' where cid='test';");` updates either a three- or two-byte value, depending on the `standard_conforming_strings` parameter (or cannot work for PostgreSQL <9.1 with `standard_conforming_strings = on`), like documented above.
 
-Note the double backslash is necessary because PHP needs the backslash escaped if it's part of a double quoted string. ("\x5878" is a three-character string 'X78' in PHP; "\\x5878" is a six-character string starting with a single backslash, which is what PostgreSQL gets passed as the expression in the SQL statement.)
+Note the double backslash is necessary because PHP needs the backslash escaped if it's part of a double quoted string. (`"\x5878"` is a three-character string 'X78' in PHP; `"\\x5878"` is a six-character string starting with a single backslash, which is what PostgreSQL gets passed as the expression in the SQL statement.)
 
 There are two helper functions to encode/decode bytea values:
 
@@ -188,11 +192,11 @@ Same behavior for most printable characters and single quotes; backslashes and n
 
 4) When the connection is to a PostgreSQL 9+ server and `standard_conforming_strings = off`:
 
-All bytes are encoded as hex digits, prepended with '\\x'.
+All bytes are encoded as hex digits, prepended with `'\\x'`.
 
 5) When the connection is to a PostgreSQL 9+ server and `standard_conforming_strings = on` (default since PostgreSQL 9.1):
 
-All bytes are encoded as hex digits, prepended with '\x'.
+All bytes are encoded as hex digits, prepended with `'\x'`.
 
 The compounded escaping behavior in points 2 & 4 accommodates for two separate things that were discussed in two sections above:
 * First, the byte value is turned into a proper string representation, by (for 4-5) turning it into a 'hex notation' string or (for 1-3) turning non-printable characters into octal escape sequences - to accommodate for the unescaping that will be done when this string is converted back to a bytea value.
@@ -261,7 +265,7 @@ In general, there doesn't seem to be a need to bind non-bytea columns to a speci
 
 For retrieving data, PDO by default returns a stream resource for a bytea field value; the field contents can be fetched by reading the stream. The `PDO::ATTR_STRINGIFY_FETCHES` connection option changes this to return the field contents directly.
 
-In either case, the binary value is returned, so we never see either of the `bytea_output` formats.
+In either case, the non-escaped byte value is returned, so we never see either of the `bytea_output` formats.
 ```php
 $driver_options = [
   PDO::ATTR_STRINGIFY_FETCHES => TRUE
@@ -308,4 +312,4 @@ TODO words on standard_conforming_strings here?
 
 
 *** TODO should I check backdrop? (Silkscreen) Should I mention it in this blog post?
---> TODO say? (somewhere general) Both parameters (bytea_output + ...) can be changed in the connection, set in the db, or in the server default.
+
