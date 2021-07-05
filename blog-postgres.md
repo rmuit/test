@@ -1,12 +1,12 @@
 # DRAFT: Handling PostgreSQL bytea (BLOB) fields in SQL, PHP, Drupal
 
-While I was upgrading a very old Drupal 6/PostgreSQL website to Drupal 7, I encountered enough issues around wrong(ly encoded) values in both query input and output... that I couldn't remember how they fit together. The logical next step is trying to write an overview of the issues that I could refer to in the future when I'd forget the details again.
+While I was upgrading a very old Drupal 6/PostgreSQL website to Drupal 7, I encountered enough issues around wrong(ly encoded) values in both query input and output... that I couldn't remember how they fit together. The logical next step is trying to write an overview of the issues that I could refer to in the future - when I'd forget the details again.
 
 This turned into a rabbit hole as I discovered related outstanding issues across Drupal 6 to 9 (and discovered flaws in some of my earlier assumptions and at least one assumption made by Drupal). The result is the text below.
 
-It's probably not good for publishing as e.g. a drupal.org documentation page because its primary purpose is to be a reference for several related things (to be browsed later if needed / to be sure I still have all my assumptions in order), not a tutorial. So unless someone has another idea about it - it'll live on my blog.
+It's probably not good for publishing as e.g. a drupal.org documentation page, because its primary purpose is to be a reference for several related things (to be browsed later if needed / to be sure I still have all my assumptions in order), not a tutorial. So unless someone has another idea about it - it'll live on my blog.
 
-## Main gotchas
+### Main gotchas
 
 The biggest cause of confusion turned out to be usage of backslashes: when are they escape characters (and when do we even need to double-escape values) and why exactly? This depends on PostgreSQL version and parameters (PostgreSQL settings). For any software that wants to support PostgreSQL versions older than 9.1 (say, Drupal 7) this can be a challenge.
 
@@ -35,7 +35,7 @@ The other one is the backslash (`\`)... sometimes. For the purpose of this text,
   * A full list of escape sequences, and references to other parameters influencing them, is available in PostgreSQL documentation about [C-Style Escapes](https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS-ESCAPE).
 * Most characters with a trailing backslash are just interpreted as that single character, e.g. `'\\'` is a single backslash and `'\''` is a single quote _if `standard_conforming_strings = off`_. Do not use `\'` though; it's potentially insecure. (By default `standard_conforming_strings = on`, `'\''` is an unterminated first part of a string. See more references to info in above link, if interested.) Use `''''` instead.
 
-PostgreSQL has a string notation which always interprets those escape codes regardless of PostgreSQL version/parameters: `E'<string value>'`. This can be useful, given that 'regular' strings are ambiguous and nowadays don't treat a backslash as an escape code. We won't do much with this notation in this text except mention them for completeness in several places.
+PostgreSQL has a string notation which always interprets those escape codes regardless of PostgreSQL version/parameters: `E'<string value>'`. This can be useful, given that 'regular' strings are ambiguous and nowadays don't treat a backslash as an escape code. We won't do much with this notation in this text, except mention them for completeness in several places.
 
 Note that escaped characters are not byte values, they are _characters_ (with a corresponding byte value). The effect is that not all character codes are valid; you may get an error like "invalid byte sequence for encoding "UTF8": 0xff".[fn]I'm not sure exactly what causes this; I didn't get such errors when connected to a PostgreSQL 13 server/database with encoding SQL_ASCII and client_encoding "UTF8", but did get them when connexted to a PostgreSQL 8.4 server/database with the same encodings. This is outside of the scope of this text, so I didn't check.[/fn]
 
@@ -109,7 +109,7 @@ If `standard_conforming_strings = on`,
 
 * On PostgreSQL 8, using the eight-character string `'\x58\x78'` in a bytea context raises an `ERROR:  invalid input syntax for type bytea`.
 
-* On PostgreSQL 9(.0/1?), using `'\x58\x78'` in a bytea context raises an `ERROR:  invalid hexadecimal digit: "\"`. This is because of the '\x' syntax discussd just below, and is the reason that just the four-character string `'\x58'` is usable as a single byte.
+* On PostgreSQL 9(.0/1?), using `'\x58\x78'` in a bytea context raises an `ERROR:  invalid hexadecimal digit: "\"`. This is because of the '\x' syntax discussed in the next point, and is the reason that just the four-character string `'\x58'` is usable as a single byte.
 ```
     E'\\x5878' for PostgreSQL >= 9
 ```
