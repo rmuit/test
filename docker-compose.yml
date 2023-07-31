@@ -1,15 +1,39 @@
+# Change SPBASE in .env.
+# SPBASE=https://samlauth.ddev.site
+#
+# ALTERNATIVELY: edit saml20-sp-remote.php so that we don't need the
+# environment variables at all. (I'm currently using a hybrid approach:
+# - The environment variables are still passed, so changing SPBASE does
+#   matter, for one site. This works fastest for testing a single site.
+# - Any additional sites that also need SAML login access, are hardcoded
+#   in saml20-sp-remote.php. See commments below.
+#
+# Related notes:
+# - For some quick SP config import into just-setup sites with samlauth
+#   enabled: see  ~/projects/drupaldev/_support-files/samlauth/README.md
+
 version: '3'
 services:
   testsamlidp_idp:
     build: .
     environment:
-      SIMPLESAMLPHP_SP_ENTITY_ID: http://app.example.com
-      SIMPLESAMLPHP_SP_ASSERTION_CONSUMER_SERVICE: http://localhost/simplesaml/module.php/saml/sp/saml2-acs.php/test-sp
-      SIMPLESAMLPHP_SP_SINGLE_LOGOUT_SERVICE: http://localhost/simplesaml/module.php/saml/sp/saml2-logout.php/test-sp
+      SIMPLESAMLPHP_SP_ENTITY_ID: SamlAuthEntityId
+      #SIMPLESAMLPHP_SP_ASSERTION_CONSUMER_SERVICE: http://localhost/simplesaml/module.php/saml/sp/saml2-acs.php/test-sp
+      #SIMPLESAMLPHP_SP_SINGLE_LOGOUT_SERVICE: http://localhost/simplesaml/module.php/saml/sp/saml2-logout.php/test-sp
+      SIMPLESAMLPHP_SP_ASSERTION_CONSUMER_SERVICE: ${SPBASE}/saml/acs
+      SIMPLESAMLPHP_SP_SINGLE_LOGOUT_SERVICE: ${SPBASE}/saml/sls
       SIMPLESAMLPHP_ADMIN_PASSWORD: test
       SIMPLESAMLPHP_SECRET_SALT: salt
     ports:
     - "8080:8080"
-    - "8443:8443"
+    #- "8443:8443"
     #volumes:
     #- /users.php:/var/www/simplesamlphp/config/simplesamlphp/authsources.php
+    # actually:
+    #- /users.php:/var/www/simplesamlphp/config/authsources.php
+    #- ?:/var/www/simplesamlphp/metadata/saml20-sp-remote.php
+    # Or instead, modify appropriate files in config/ and rebuild the image,
+    # because those are all copied into the image? <- that's what I'm doing at the
+    # moment, or - just re-edit the new changes into the running container using
+    #  docker exec -ti docker-test-saml-idp-testsamlidp_idp-1 /bin/sh
+    #  # vi /var/www/simplesamlphp/metadata/saml20-sp-remote.php
